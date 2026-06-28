@@ -7,12 +7,12 @@ from agro_calc import create_result_excel
 
 
 st.set_page_config(
-    page_title="Agroklimatik Hisoblash",
+    page_title="Agro Meva fazalar ",
     page_icon="🌱",
     layout="centered"
 )
 
-st.title("🌱 Agroklimatik hisoblash tizimi")
+st.title("🌱 Agrometeorologik mevalarning fazalarini hisoblash")
 
 st.write(
     "Fenologik Excel faylni yuklang. "
