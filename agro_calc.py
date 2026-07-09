@@ -8,7 +8,6 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 AIR_COL = "avg_temp"
 BASE_TEMP = 10
 
-
 PHASES = [
     "Kurtakning bo'rtishi",
     "1-barg yozilishi",
@@ -27,14 +26,13 @@ def make_date(y, m, d):
 
 
 def date_text(dt):
-    if dt is None:
+    if dt is None or pd.isna(dt):
         return ""
     return f"{dt.day}/{dt.month}"
 
 
 def read_agro_data(path, sheet_name):
     xls = pd.ExcelFile(path)
-
     sheet_map = {str(s).strip().lower(): s for s in xls.sheet_names}
     key = str(sheet_name).strip().lower()
 
@@ -44,13 +42,10 @@ def read_agro_data(path, sheet_name):
             f"Mavjud sheetlar: {', '.join(xls.sheet_names)}"
         )
 
-    real_sheet_name = sheet_map[key]
-    df = pd.read_excel(path, sheet_name=real_sheet_name)
-
+    df = pd.read_excel(path, sheet_name=sheet_map[key])
     df.columns = [str(c).strip().lower() for c in df.columns]
 
     required = ["year", "month", "days", AIR_COL]
-
     for col in required:
         if col not in df.columns:
             raise ValueError(f"Excel bazada '{col}' ustuni topilmadi!")
@@ -80,12 +75,25 @@ def read_agro_data(path, sheet_name):
 
 
 def read_phase_excel(path_or_file):
+    """
+    Yuklanadigan Excel formati:
+
+    0-ustun: Stansiya nomi
+
+    1-3 ustun: Kurtakning bo'rtishi yil/oy/kun
+    4-6 ustun: 1-barg yozilishi yil/oy/kun
+    7-9 ustun: Gullashi yil/oy/kun
+    10-12 ustun: Pishib yetilish boshlanishi yil/oy/kun
+    """
+
     raw = pd.read_excel(path_or_file, header=None)
 
     rows = []
 
     for i in range(1, len(raw)):
         r = raw.iloc[i]
+
+        stansiya = r.iloc[0]
 
         p1 = make_date(r.iloc[1], r.iloc[2], r.iloc[3])
         p2 = make_date(r.iloc[4], r.iloc[5], r.iloc[6])
@@ -100,6 +108,8 @@ def read_phase_excel(path_or_file):
 
         rows.append({
             "year": years[0],
+            "stansiya": stansiya,
+            "nav": "",
             "Kurtakning bo'rtishi": p1,
             "1-barg yozilishi": p2,
             "Gullashi": p3,
@@ -142,76 +152,75 @@ def calc_period(df, start_date, end_date):
 
     return {
         "kun": len(above10),
-        "aktiv": above10[AIR_COL].sum(),
-        "effektiv": (above10[AIR_COL] - BASE_TEMP).sum()
+        "aktiv": round(above10[AIR_COL].sum(), 1),
+        "effektiv": round((above10[AIR_COL] - BASE_TEMP).sum(), 1)
     }
 
 
-def build_mavsum_boshidan(df, phase_df):
+def build_one_sheet(df, phase_df, station_name):
     rows = []
 
     for _, r in phase_df.iterrows():
         year = int(r["year"])
+
         start_date = find_start_by_10_degree(df, year)
 
-        row = {
-            "YILLAR": year,
-            "Hisoblash boshlangan sana": date_text(start_date)
-        }
+        p1 = r["Kurtakning bo'rtishi"]
+        p2 = r["1-barg yozilishi"]
+        p3 = r["Gullashi"]
+        p4 = r["Pishib yetilish boshlanishi"]
 
-        for phase in PHASES:
-            phase_date = r[phase]
-            air = calc_period(df, start_date, phase_date)
+        stansiya = r.get("stansiya", station_name)
+        if pd.isna(stansiya) or str(stansiya).strip() == "":
+            stansiya = station_name
 
-            row[f"{phase} | Sana"] = date_text(phase_date)
-            row[f"{phase} | Kun - Havo"] = air["kun"]
-            row[f"{phase} | Havo Aktiv ΣT"] = round(air["aktiv"], 1)
-            row[f"{phase} | Havo Effektiv ΣT"] = round(air["effektiv"], 1)
+        nav = r.get("nav", "")
+        if pd.isna(nav):
+            nav = ""
 
-        rows.append(row)
+        # Fazalar orasidagi hisob
+        h1 = calc_period(df, start_date, p1)
+        h2 = calc_period(df, p1, p2)
+        h3 = calc_period(df, p2, p3)
+        h4 = calc_period(df, p3, p4)
 
-    return pd.DataFrame(rows)
-
-
-def build_fazalar_orasi(df, phase_df):
-    rows = []
-
-    phase_pairs = [
-        ("Hisoblash boshlangan sana", "Kurtakning bo'rtishi"),
-        ("Kurtakning bo'rtishi", "1-barg yozilishi"),
-        ("1-barg yozilishi", "Gullashi"),
-        ("Gullashi", "Pishib yetilish boshlanishi")
-    ]
-
-    for _, r in phase_df.iterrows():
-        year = int(r["year"])
-        start_date = find_start_by_10_degree(df, year)
-
-        dates = {
-            "Hisoblash boshlangan sana": start_date,
-            "Kurtakning bo'rtishi": r["Kurtakning bo'rtishi"],
-            "1-barg yozilishi": r["1-barg yozilishi"],
-            "Gullashi": r["Gullashi"],
-            "Pishib yetilish boshlanishi": r["Pishib yetilish boshlanishi"]
-        }
+        # Mavsum boshidan yig'indi
+        c2 = calc_period(df, start_date, p2)
+        c3 = calc_period(df, start_date, p3)
+        c4 = calc_period(df, start_date, p4)
 
         row = {
-            "YILLAR": year
+            "Год": year,
+            "Stansiya": stansiya,
+            "Nav": nav,
+            "Hisoblash boshlangan sana": date_text(start_date),
+
+            "Kurtakning bo'rtishi": date_text(p1),
+            "Кун - Havo": h1["kun"],
+            "Havo Aktiv Σ.T.": h1["aktiv"],
+            "Havo Effektiv Σ.T": h1["effektiv"],
+
+            "1-barg yozilishi": date_text(p2),
+            "Кун - Havo ": h2["kun"],
+            "Havo Aktiv Σ.T. ": h2["aktiv"],
+            "Havo Effektiv Σ.T ": h2["effektiv"],
+            "0 > Aktiv .Σ.T. Mavsum boshidan": c2["aktiv"],
+            "10>Havo Effektiv Σ.T Mavsum boshidan": c2["effektiv"],
+
+            "Gullashi": date_text(p3),
+            "Кун - Havo  ": h3["kun"],
+            "Havo Aktiv Σ.T.  ": h3["aktiv"],
+            "Havo Effektiv Σ.T  ": h3["effektiv"],
+            "0 > Aktiv .Σ.T. Mavsum boshidan ": c3["aktiv"],
+            "10>Havo Effektiv Σ.T Mavsum boshidan ": c3["effektiv"],
+
+            "Pishib yetilish boshlanishi": date_text(p4),
+            "Кун - Havo   ": h4["kun"],
+            "Havo Aktiv Σ.T.   ": h4["aktiv"],
+            "Havo Effektiv Σ.T   ": h4["effektiv"],
+            "0 > Aktiv .Σ.T. Mavsum boshidan  ": c4["aktiv"],
+            "10>Havo Effektiv Σ.T Mavsum boshidan  ": c4["effektiv"],
         }
-
-        for start_name, end_name in phase_pairs:
-            s_date = dates[start_name]
-            e_date = dates[end_name]
-
-            air = calc_period(df, s_date, e_date)
-
-            block = f"{start_name} -> {end_name}"
-
-            row[f"{block} | Boshlanish sana"] = date_text(s_date)
-            row[f"{block} | Faza o'zgargan sana"] = date_text(e_date)
-            row[f"{block} | Kun - Havo"] = air["kun"]
-            row[f"{block} | Havo Aktiv ΣT"] = round(air["aktiv"], 1)
-            row[f"{block} | Havo Effektiv ΣT"] = round(air["effektiv"], 1)
 
         rows.append(row)
 
@@ -222,8 +231,9 @@ def format_excel(path):
     wb = load_workbook(path)
 
     green = PatternFill("solid", fgColor="C6E0B4")
-    yellow = PatternFill("solid", fgColor="FFF2CC")
     blue = PatternFill("solid", fgColor="D9EAF7")
+    yellow = PatternFill("solid", fgColor="FFF2CC")
+
     thin = Side(style="thin", color="999999")
 
     for ws in wb.worksheets:
@@ -243,10 +253,12 @@ def format_excel(path):
                 bottom=thin
             )
 
-            if "Faza o'zgargan sana" in str(cell.value):
-                cell.fill = yellow
-            elif "Sana" in str(cell.value) or "sana" in str(cell.value):
+            value = str(cell.value)
+
+            if "sana" in value.lower() or "bo'rtishi" in value or "Gullashi" in value:
                 cell.fill = blue
+            elif "Mavsum boshidan" in value:
+                cell.fill = yellow
             else:
                 cell.fill = green
 
@@ -271,7 +283,7 @@ def format_excel(path):
                 if cell.value is not None:
                     max_len = max(max_len, len(str(cell.value)))
 
-            ws.column_dimensions[col_letter].width = min(max_len + 3, 28)
+            ws.column_dimensions[col_letter].width = min(max_len + 3, 30)
 
     wb.save(path)
 
@@ -280,19 +292,12 @@ def create_result_excel(data_excel_path, phase_file, station_name, output_path):
     df = read_agro_data(data_excel_path, station_name)
     phase_df = read_phase_excel(phase_file)
 
-    mavsum_df = build_mavsum_boshidan(df, phase_df)
-    fazalar_df = build_fazalar_orasi(df, phase_df)
+    result_df = build_one_sheet(df, phase_df, station_name)
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        mavsum_df.to_excel(
+        result_df.to_excel(
             writer,
-            sheet_name="Mavsum_boshidan",
-            index=False
-        )
-
-        fazalar_df.to_excel(
-            writer,
-            sheet_name="Fazalar_orasi",
+            sheet_name="Natija",
             index=False
         )
 
