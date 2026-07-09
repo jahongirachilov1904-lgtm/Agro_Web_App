@@ -1,5 +1,6 @@
 import pandas as pd
 from datetime import datetime
+
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
@@ -57,7 +58,7 @@ def read_agro_data(path, sheet_name):
     for col in required:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    df = df.dropna(subset=["year", "month", "days"])
+    df = df.dropna(subset=["year", "month", "days", AIR_COL])
 
     df["year"] = df["year"].astype(int)
     df["month"] = df["month"].astype(int)
@@ -79,19 +80,6 @@ def read_agro_data(path, sheet_name):
 
 
 def read_phase_excel(path_or_file):
-    """
-    Yangi yuklanadigan Excel formati:
-
-    0-ustun: Stansiya nomi
-
-    1-3 ustun: Kurtakning bo'rtishi yil/oy/kun
-    4-6 ustun: 1-barg yozilishi yil/oy/kun
-    7-9 ustun: Gullashi yil/oy/kun
-    10-12 ustun: Pishib yetilish boshlanishi yil/oy/kun
-
-    Bu faylda mavsum boshlanish sanasi bo'lmaydi.
-    """
-
     raw = pd.read_excel(path_or_file, header=None)
 
     rows = []
@@ -122,11 +110,6 @@ def read_phase_excel(path_or_file):
 
 
 def find_start_by_10_degree(df, year):
-    """
-    Har bir yil uchun avg_temp >= 10°C bo'lgan birinchi kunni topadi.
-    10.0°C bo'lsa ham hisobga oladi.
-    """
-
     data = df[
         (df["year"] == year) &
         (df[AIR_COL] >= BASE_TEMP)
@@ -141,19 +124,6 @@ def find_start_by_10_degree(df, year):
 
 
 def calc_period(df, start_date, end_date):
-    """
-    start_date dan end_date gacha hisoblaydi.
-
-    Kun - Havo:
-        avg_temp >= 10°C bo'lgan kunlar soni
-
-    Havo Aktiv ΣT:
-        avg_temp >= 10°C bo'lgan kunlarning harorat yig'indisi
-
-    Havo Effektiv ΣT:
-        Σ(avg_temp - 10), faqat avg_temp >= 10°C kunlar uchun
-    """
-
     if start_date is None or end_date is None or end_date < start_date:
         return {
             "kun": 0,
@@ -182,7 +152,6 @@ def build_mavsum_boshidan(df, phase_df):
 
     for _, r in phase_df.iterrows():
         year = int(r["year"])
-
         start_date = find_start_by_10_degree(df, year)
 
         row = {
@@ -216,7 +185,6 @@ def build_fazalar_orasi(df, phase_df):
 
     for _, r in phase_df.iterrows():
         year = int(r["year"])
-
         start_date = find_start_by_10_degree(df, year)
 
         dates = {
@@ -248,3 +216,86 @@ def build_fazalar_orasi(df, phase_df):
         rows.append(row)
 
     return pd.DataFrame(rows)
+
+
+def format_excel(path):
+    wb = load_workbook(path)
+
+    green = PatternFill("solid", fgColor="C6E0B4")
+    yellow = PatternFill("solid", fgColor="FFF2CC")
+    blue = PatternFill("solid", fgColor="D9EAF7")
+    thin = Side(style="thin", color="999999")
+
+    for ws in wb.worksheets:
+        ws.freeze_panes = "A2"
+
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(
+                horizontal="center",
+                vertical="center",
+                wrap_text=True
+            )
+            cell.border = Border(
+                left=thin,
+                right=thin,
+                top=thin,
+                bottom=thin
+            )
+
+            if "Faza o'zgargan sana" in str(cell.value):
+                cell.fill = yellow
+            elif "Sana" in str(cell.value) or "sana" in str(cell.value):
+                cell.fill = blue
+            else:
+                cell.fill = green
+
+        for row in ws.iter_rows(min_row=2):
+            for cell in row:
+                cell.alignment = Alignment(
+                    horizontal="center",
+                    vertical="center"
+                )
+                cell.border = Border(
+                    left=thin,
+                    right=thin,
+                    top=thin,
+                    bottom=thin
+                )
+
+        for col in ws.columns:
+            max_len = 0
+            col_letter = col[0].column_letter
+
+            for cell in col:
+                if cell.value is not None:
+                    max_len = max(max_len, len(str(cell.value)))
+
+            ws.column_dimensions[col_letter].width = min(max_len + 3, 28)
+
+    wb.save(path)
+
+
+def create_result_excel(data_excel_path, phase_file, station_name, output_path):
+    df = read_agro_data(data_excel_path, station_name)
+    phase_df = read_phase_excel(phase_file)
+
+    mavsum_df = build_mavsum_boshidan(df, phase_df)
+    fazalar_df = build_fazalar_orasi(df, phase_df)
+
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        mavsum_df.to_excel(
+            writer,
+            sheet_name="Mavsum_boshidan",
+            index=False
+        )
+
+        fazalar_df.to_excel(
+            writer,
+            sheet_name="Fazalar_orasi",
+            index=False
+        )
+
+    format_excel(output_path)
+
+    return output_path
