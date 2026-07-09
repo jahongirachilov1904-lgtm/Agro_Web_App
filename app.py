@@ -18,8 +18,8 @@ st.title("🌱 Agrometeorologik mevalarning fazalarini hisoblash")
 
 st.write(
     "Fenologik Excel faylni yuklang. "
-    "Dastur fayl nomidan stansiyani avtomatik aniqlaydi. "
-    "Hisoblash har bir yilda avg_temp >= 10°C bo'lgan birinchi kundan boshlanadi."
+    "Harorat chegarasini 1°C dan 15°C gacha tanlang. "
+    "Dastur fayl nomidan stansiyani avtomatik aniqlaydi."
 )
 
 
@@ -41,13 +41,22 @@ if not os.path.exists(DATA_EXCEL_PATH):
 def clean_station_name(file_name):
     base_name = os.path.splitext(file_name)[0]
 
-    # Urganch(1) -> Urganch
+    # Shahrisabz(1) -> Shahrisabz
     base_name = re.sub(r"\(\d+\)", "", base_name)
 
-    # Urganch_2020 -> Urganch
+    # Shahrisabz_2020 -> Shahrisabz
     station_name = base_name.split("_")[0]
 
     return station_name.strip()
+
+
+base_temp = st.number_input(
+    "Hisoblash boshlanadigan harorat chegarasini tanlang (°C)",
+    min_value=1,
+    max_value=15,
+    value=10,
+    step=1
+)
 
 
 uploaded_file = st.file_uploader(
@@ -63,6 +72,7 @@ if uploaded_file is not None:
 
     st.success(f"Yuklangan fayl: {file_name}")
     st.info(f"Aniqlangan stansiya: {station_name}")
+    st.info(f"Tanlangan harorat chegarasi: {base_temp}°C")
 
     if st.button("Hisoblashni boshlash"):
         try:
@@ -74,14 +84,15 @@ if uploaded_file is not None:
                 with open(phase_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
 
-                output_name = f"{base_name}_natija.xlsx"
+                output_name = f"{base_name}_natija_{base_temp}C.xlsx"
                 output_path = os.path.join(temp_dir, output_name)
 
                 result_path = create_result_excel(
                     data_excel_path=DATA_EXCEL_PATH,
                     phase_file=phase_path,
                     station_name=station_name,
-                    output_path=output_path
+                    output_path=output_path,
+                    base_temp=base_temp
                 )
 
             st.success("Hisoblash yakunlandi!")
