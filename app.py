@@ -41,10 +41,10 @@ if not os.path.exists(DATA_EXCEL_PATH):
 def clean_station_name(file_name):
     base_name = os.path.splitext(file_name)[0]
 
-    # Shahrisabz(1) -> Shahrisabz
+    # Masalan: Shahrisabz(1) -> Shahrisabz
     base_name = re.sub(r"\(\d+\)", "", base_name)
 
-    # Shahrisabz_2020 -> Shahrisabz
+    # Masalan: Shahrisabz_2020 -> Shahrisabz
     station_name = base_name.split("_")[0]
 
     return station_name.strip()
