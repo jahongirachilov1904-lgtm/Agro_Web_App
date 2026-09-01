@@ -1,6 +1,6 @@
-import os
 import re
 import tempfile
+from pathlib import Path
 
 import streamlit as st
 
@@ -23,15 +23,12 @@ st.write(
 )
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = Path(__file__).resolve().parent
 
-DATA_EXCEL_PATH = os.path.join(
-    BASE_DIR,
-    "Agro_T2M_kunlik_1991_2025.xlsx"
-)
+DATA_EXCEL_PATH = BASE_DIR / "Agro_T2M_kunlik_1991_2025.xlsx"
 
 
-if not os.path.exists(DATA_EXCEL_PATH):
+if not DATA_EXCEL_PATH.exists():
     st.error(
         "Agro_T2M_kunlik_1991_2025.xlsx baza fayli loyiha papkasida topilmadi!"
     )
@@ -39,7 +36,7 @@ if not os.path.exists(DATA_EXCEL_PATH):
 
 
 def clean_station_name(file_name):
-    base_name = os.path.splitext(file_name)[0]
+    base_name = Path(file_name).stem
 
     # Masalan: Shahrisabz(1) -> Shahrisabz
     base_name = re.sub(r"\(\d+\)", "", base_name)
@@ -67,7 +64,7 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
     file_name = uploaded_file.name
-    base_name = os.path.splitext(file_name)[0]
+    base_name = Path(file_name).stem
     station_name = clean_station_name(file_name)
 
     st.success(f"Yuklangan fayl: {file_name}")
@@ -79,13 +76,13 @@ if uploaded_file is not None:
             with st.spinner("Hisoblanmoqda..."):
                 temp_dir = tempfile.mkdtemp()
 
-                phase_path = os.path.join(temp_dir, file_name)
+                phase_path = Path(temp_dir) / file_name
 
                 with open(phase_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
 
                 output_name = f"{base_name}_natija_{base_temp}C.xlsx"
-                output_path = os.path.join(temp_dir, output_name)
+                output_path = Path(temp_dir) / output_name
 
                 result_path = create_result_excel(
                     data_excel_path=DATA_EXCEL_PATH,

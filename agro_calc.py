@@ -6,6 +6,7 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 
 AIR_COL = "avg_temp"
+RAIN_COL = "precipitation"
 
 PHASES = [
     "Kurtakning bo'rtishi",
@@ -50,7 +51,7 @@ def read_agro_data(data_excel_path, station_name):
     df = pd.read_excel(data_excel_path, sheet_name=sheet_map[key])
     df.columns = [str(c).strip().lower() for c in df.columns]
 
-    required_cols = ["year", "month", "days", AIR_COL]
+    required_cols = ["year", "month", "days", AIR_COL, RAIN_COL]
 
     for col in required_cols:
         if col not in df.columns:
@@ -133,6 +134,11 @@ def find_start_by_base_temp(df, year, base_temp):
 
 
 def calc_period(df, start_date, end_date, base_temp):
+    """Calculate temperatures in the half-open [start_date, end_date) period.
+
+    The end date belongs to the next phenological phase, so its temperature
+    must not be included in the current phase's totals.
+    """
     if start_date is None or end_date is None:
         return {
             "kun": 0,
@@ -149,7 +155,7 @@ def calc_period(df, start_date, end_date, base_temp):
 
     data = df[
         (df["date"] >= start_date) &
-        (df["date"] <= end_date)
+        (df["date"] < end_date)
     ].copy()
 
     data = data.dropna(subset=[AIR_COL])
@@ -163,6 +169,40 @@ def calc_period(df, start_date, end_date, base_temp):
         "kun": int(len(selected)),
         "aktiv": round(float(aktiv), 1),
         "effektiv": round(float(effektiv), 1)
+    }
+
+
+def calc_rain_period(df, start_date, end_date):
+    """Calculate precipitation in the half-open [start_date, end_date) period.
+
+    A rainy day is a day with precipitation greater than 0 mm. If the
+    selected period contains no precipitation observations at all, blank
+    values are returned so missing data is not reported as zero rainfall.
+    """
+    if start_date is None or end_date is None or end_date < start_date:
+        return {
+            "yoginli_kun": None,
+            "jami_yogin": None
+        }
+
+    data = df[
+        (df["date"] >= start_date) &
+        (df["date"] < end_date)
+    ].copy()
+
+    precipitation = pd.to_numeric(data[RAIN_COL], errors="coerce").dropna()
+
+    if precipitation.empty:
+        return {
+            "yoginli_kun": None,
+            "jami_yogin": None
+        }
+
+    rainy = precipitation[precipitation > 0]
+
+    return {
+        "yoginli_kun": int(len(rainy)),
+        "jami_yogin": round(float(precipitation.sum()), 1)
     }
 
 
@@ -203,12 +243,28 @@ def build_natija_sheet(df, phase_df, station_name, base_temp):
                 base_temp=base_temp
             )
 
+            interval_rain = calc_rain_period(
+                df=df,
+                start_date=previous_date,
+                end_date=phase_date
+            )
+
+            season_rain = calc_rain_period(
+                df=df,
+                start_date=start_date,
+                end_date=phase_date
+            )
+
             row[f"{phase} | Sana"] = date_text(phase_date)
             row[f"{phase} | Kun - Havo"] = interval_calc["kun"]
             row[f"{phase} | Havo Aktiv ΣT"] = interval_calc["aktiv"]
             row[f"{phase} | Havo Effektiv ΣT"] = interval_calc["effektiv"]
+            row[f"{phase} | Yog'inli kun"] = interval_rain["yoginli_kun"]
+            row[f"{phase} | Jami yog'in (mm)"] = interval_rain["jami_yogin"]
             row[f"{phase} | Mavsum boshidan Aktiv ΣT"] = season_calc["aktiv"]
             row[f"{phase} | Mavsum boshidan Effektiv ΣT"] = season_calc["effektiv"]
+            row[f"{phase} | Mavsum boshidan yog'inli kun"] = season_rain["yoginli_kun"]
+            row[f"{phase} | Mavsum boshidan jami yog'in (mm)"] = season_rain["jami_yogin"]
 
             previous_date = phase_date
 
@@ -262,6 +318,12 @@ def build_fazalar_farqi_sheet(df, phase_df, station_name, base_temp):
                 base_temp=base_temp
             )
 
+            rain_calc = calc_rain_period(
+                df=df,
+                start_date=s_date,
+                end_date=e_date
+            )
+
             block = f"{start_name} -> {end_name}"
 
             row[f"{block} | Boshlanish sana"] = date_text(s_date)
@@ -269,6 +331,8 @@ def build_fazalar_farqi_sheet(df, phase_df, station_name, base_temp):
             row[f"{block} | Kun - Havo"] = calc["kun"]
             row[f"{block} | Havo Aktiv ΣT"] = calc["aktiv"]
             row[f"{block} | Havo Effektiv ΣT"] = calc["effektiv"]
+            row[f"{block} | Yog'inli kun"] = rain_calc["yoginli_kun"]
+            row[f"{block} | Jami yog'in (mm)"] = rain_calc["jami_yogin"]
 
         rows.append(row)
 
@@ -306,6 +370,8 @@ def format_excel(output_path):
                 cell.fill = blue
             elif "Mavsum boshidan" in value:
                 cell.fill = yellow
+            elif "yog'in" in value.lower():
+                cell.fill = blue
             else:
                 cell.fill = green
 
